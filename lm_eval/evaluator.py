@@ -601,7 +601,10 @@ def evaluate(
 
         # put responses from model into a list of length K for each request.
         for x, req in zip(resps, cloned_reqs, strict=True):
-            req.resps.append(x)
+            metadata = getattr(x, "generation_metadata", None)
+            req.resps.append(str(x) if metadata is not None else x)
+            req.generation_metadata.append(metadata)
+            req.has_generation_metadata |= metadata is not None
 
         if lm.world_size > 1:
             lm.barrier()
@@ -663,12 +666,9 @@ def evaluate(
                         "prompt_hash": hash_string(requests[0].arguments[0]),
                         "target_hash": hash_string(str(target)),
                     }
-                    if any(req.generation_metadata for req in requests):
+                    if any(req.has_generation_metadata for req in requests):
                         example["generation_metadata"] = [
-                            req.generation_metadata
-                            if req.generation_metadata
-                            else [None] * len(req.resps)
-                            for req in requests
+                            req.generation_metadata for req in requests
                         ]
                     example.update(metrics)
                     acc["logged_samples"].append(example)
