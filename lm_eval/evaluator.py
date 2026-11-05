@@ -663,6 +663,13 @@ def evaluate(
                         "prompt_hash": hash_string(requests[0].arguments[0]),
                         "target_hash": hash_string(str(target)),
                     }
+                    if any(req.generation_metadata for req in requests):
+                        example["generation_metadata"] = [
+                            req.generation_metadata
+                            if req.generation_metadata
+                            else [None] * len(req.resps)
+                            for req in requests
+                        ]
                     example.update(metrics)
                     acc["logged_samples"].append(example)
                 for metric, value in metrics.items():

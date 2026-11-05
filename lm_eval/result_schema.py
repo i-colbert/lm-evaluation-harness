@@ -196,6 +196,12 @@ class SampleResult(TypedDict, extra_items=float):
     Generation: ``list[list[str]]`` — requests × repeats × generated text.
     Multiple-choice: ``list[list[list[str]]]`` — requests × repeats × ``[log_prob, is_greedy]``."""
 
+    generation_metadata: NotRequired[list[list[dict[str, Any] | None]]]
+    """Optional generation metadata aligned with ``resps``.
+    Currently populated by chat-completion API models with the server-reported
+    ``completion_tokens`` and ``finish_reason``. ``None`` denotes a response
+    served from the response cache, where this metadata was not stored."""
+
     filtered_resps: list[str] | list[list[str]]
     """Responses after filter application.  Per-request.
     Generation: ``list[str]``.

@@ -238,6 +238,35 @@ class LocalChatCompletion(LocalCompletionsAPI):
             res = res + tmp
         return res
 
+    def parse_generations_with_metadata(
+        self, outputs: dict | list[dict], **kwargs
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+        """Return chat generations with the usage and stop reason from each response."""
+        generations = self.parse_generations(outputs=outputs, **kwargs)
+        if not isinstance(outputs, list):
+            outputs = [outputs]
+
+        metadata = []
+        for output in outputs:
+            usage = output.get("usage") if isinstance(output, dict) else None
+            choices = output.get("choices") if isinstance(output, dict) else None
+            choice = choices[0] if isinstance(choices, list) and choices else None
+            metadata.append(
+                {
+                    "completion_tokens": (
+                        usage.get("completion_tokens")
+                        if isinstance(usage, dict)
+                        else None
+                    ),
+                    "finish_reason": (
+                        choice.get("finish_reason")
+                        if isinstance(choice, dict)
+                        else None
+                    ),
+                }
+            )
+        return generations, metadata
+
     def tok_encode(
         self,
         string: str | Any,

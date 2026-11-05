@@ -17,6 +17,7 @@ class Instance:
         default_factory=lambda: (None, None, None)
     )
     resps: list = field(default_factory=list)
+    generation_metadata: list[dict] = field(default_factory=list)
     filtered_resps: dict = field(default_factory=dict)
 
     # initialized after init

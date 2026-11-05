@@ -313,6 +313,13 @@ class TemplateAPI(TemplateLM):
         """Method used to parse the generations from the (batched) API response. This method should return a list of str"""
         raise NotImplementedError
 
+    def parse_generations_with_metadata(
+        self, outputs: Any | list[Any], **kwargs
+    ) -> tuple[list[str], list[dict[str, Any] | None]]:
+        """Parse generations and optional per-generation response metadata."""
+        generations = self.parse_generations(outputs=outputs, **kwargs)
+        return generations, [None] * len(generations)
+
     @cached_property
     def api_key(self) -> str:
         """Override this property to return the API key for the API request."""
@@ -497,6 +504,7 @@ class TemplateAPI(TemplateLM):
         cache_keys: list | None = None,
         ctxlens: list[int] | None = None,
         gen_kwargs: dict | None = None,
+        instances: list[Instance | None] | None = None,
         **kwargs,
     ) -> list[str] | list[tuple[float, bool]] | None:
         # !!! Copy: shared dict for each request, need new object !!!
@@ -525,17 +533,17 @@ class TemplateAPI(TemplateLM):
                 # raising exception will retry the request
                 response.raise_for_status()
                 outputs = await response.json()
-            tmp_answers = (
-                self.parse_generations(
+            if generate:
+                tmp_answers, generation_metadata = self.parse_generations_with_metadata(
                     outputs=outputs,
                 )
-                if generate
-                else self.parse_logprobs(
+            else:
+                tmp_answers = self.parse_logprobs(
                     outputs=outputs,
                     tokens=messages,
                     ctxlens=ctxlens,
                 )
-            )
+                generation_metadata = []
 
             # Convert `None`` values to `LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER` string to maintain consistency
             answers = []
@@ -547,6 +555,13 @@ class TemplateAPI(TemplateLM):
                     answers.append(LMEVAL_MODEL_NONE_ANSWER_PLACEHOLDER)
                 else:
                     answers.append(a)
+
+            if instances:
+                for metadata, instance in zip(
+                    generation_metadata, instances, strict=False
+                ):
+                    if metadata is not None and instance is not None:
+                        instance.generation_metadata.append(metadata)
 
             if cache_keys:
                 for res, cache in zip(answers, cache_keys, strict=False):
@@ -592,9 +607,11 @@ class TemplateAPI(TemplateLM):
         *,
         generate: bool = True,
         ctxlens: list[int] | None = None,
+        instances: list[Instance] | None = None,
         **kwargs,
     ) -> list[list[str]] | list[list[tuple[float, bool]]]:
         ctxlens = ctxlens or [None] * len(requests)
+        instances = instances or [None] * len(requests)
         conn = TCPConnector(limit=self._concurrent, ssl=self.verify_certificate)
         sem = asyncio.Semaphore(self._concurrent)
         async with ClientSession(
@@ -618,13 +635,15 @@ class TemplateAPI(TemplateLM):
                         cache_keys=cache_key,
                         generate=generate,
                         ctxlens=ctxlen,
+                        instances=instance_batch,
                         **kwargs,
                     )
                 )
-                for message, cache_key, ctxlen in zip(
+                for message, cache_key, ctxlen, instance_batch in zip(
                     chunks(requests, n=self._batch_size),
                     chunks(cache_keys, n=self._batch_size),
                     chunks(ctxlens, n=self._batch_size),
+                    chunks(instances, n=self._batch_size),
                     strict=False,
                 )
             ]
@@ -699,6 +718,7 @@ class TemplateAPI(TemplateLM):
         self, requests: list[Instance], disable_tqdm: bool = False
     ) -> list[str]:
         res = []
+        instances = requests
 
         def _collate_gen(_requests):
             # sort by the length of the non-tokenized contexts
@@ -736,8 +756,10 @@ class TemplateAPI(TemplateLM):
         else:
             encodings_list = [None] * len(requests)
         requests = [
-            (a, b, c)
-            for a, b, c in zip(requests, all_gen_kwargs, encodings_list, strict=False)
+            (a, b, c, instance)
+            for a, b, c, instance in zip(
+                requests, all_gen_kwargs, encodings_list, instances, strict=False
+            )
         ]
 
         re_ord = Collator(
@@ -755,7 +777,9 @@ class TemplateAPI(TemplateLM):
         if self._concurrent <= 1:
             pbar = tqdm(desc="Requesting API", total=len(requests))
             for chunk in chunked:
-                contexts, all_gen_kwargs, encodings_list = zip(*chunk, strict=False)
+                contexts, all_gen_kwargs, encodings_list, instances = zip(
+                    *chunk, strict=False
+                )
                 if self.tokenized_requests:
                     max_gen_toks = all_gen_kwargs[0].get(
                         "max_gen_toks", self._max_gen_toks
@@ -781,12 +805,17 @@ class TemplateAPI(TemplateLM):
                     generate=True,
                     gen_kwargs=copy.deepcopy(all_gen_kwargs[0]),
                 )
-                for generated_text, context in zip(
-                    self.parse_generations(
+                generated_texts, generation_metadata = (
+                    self.parse_generations_with_metadata(
                         outputs=outputs,
                         contexts=contexts,
-                    ),
+                    )
+                )
+                for generated_text, metadata, context, instance in zip(
+                    generated_texts,
+                    generation_metadata,
                     contexts,
+                    instances,
                     strict=False,
                 ):
                     # Always append to res to maintain the correct number of items
@@ -800,6 +829,9 @@ class TemplateAPI(TemplateLM):
                     else:
                         res.append(generated_text)
 
+                    if metadata is not None:
+                        instance.generation_metadata.append(metadata)
+
                     # partial caching only for successful generations
                     if generated_text is not None and context is not None:
                         self.cache_hook.add_partial(
@@ -810,7 +842,9 @@ class TemplateAPI(TemplateLM):
                     pbar.update(1)
         else:
             for chunk in chunked:
-                contexts, all_gen_kwargs, encodings_list = zip(*chunk, strict=False)
+                contexts, all_gen_kwargs, encodings_list, instances = zip(
+                    *chunk, strict=False
+                )
                 if self.tokenized_requests:
                     max_gen_toks = all_gen_kwargs[0].get(
                         "max_gen_toks", self._max_gen_toks
@@ -834,6 +868,7 @@ class TemplateAPI(TemplateLM):
                             cache_keys=[(ctx, all_gen_kwargs[0]) for ctx in contexts],
                             generate=True,
                             gen_kwargs=copy.deepcopy(all_gen_kwargs[0]),
+                            instances=list(instances),
                         )
                     )
                 )
