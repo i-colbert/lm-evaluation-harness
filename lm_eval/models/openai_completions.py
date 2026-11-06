@@ -253,6 +253,9 @@ class LocalChatCompletion(LocalCompletionsAPI):
             choice = choices[0] if isinstance(choices, list) and choices else None
             metadata.append(
                 {
+                    "prompt_tokens": (
+                        usage.get("prompt_tokens") if isinstance(usage, dict) else None
+                    ),
                     "completion_tokens": (
                         usage.get("completion_tokens")
                         if isinstance(usage, dict)

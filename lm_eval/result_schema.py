@@ -199,8 +199,9 @@ class SampleResult(TypedDict, extra_items=float):
     generation_metadata: NotRequired[list[list[dict[str, Any] | None]]]
     """Optional generation metadata aligned with ``resps``.
     Currently populated by chat-completion API models with the server-reported
-    ``completion_tokens`` and ``finish_reason``. ``None`` denotes a response
-    served from the response cache, where this metadata was not stored."""
+    ``prompt_tokens``, ``completion_tokens``, and ``finish_reason``. ``None``
+    denotes a response served from the response cache, where this metadata was
+    not stored."""
 
     filtered_resps: list[str] | list[list[str]]
     """Responses after filter application.  Per-request.

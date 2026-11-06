@@ -108,7 +108,7 @@ def test_log_samples_keeps_chat_response_metadata_with_identical_answers(tmp_pat
         def dump_config(self):
             return {}
 
-    def mock_response(completion_tokens, finish_reason):
+    def mock_response(prompt_tokens, completion_tokens, finish_reason):
         response = MagicMock()
         response.ok = True
         response.json.return_value = {
@@ -119,7 +119,10 @@ def test_log_samples_keeps_chat_response_metadata_with_identical_answers(tmp_pat
                     "finish_reason": finish_reason,
                 }
             ],
-            "usage": {"completion_tokens": completion_tokens},
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+            },
         }
         return response
 
@@ -129,7 +132,10 @@ def test_log_samples_keeps_chat_response_metadata_with_identical_answers(tmp_pat
     task = ChatGenerationTask()
     with patch(
         "lm_eval.models.api_models.requests.post",
-        side_effect=[mock_response(3, "stop"), mock_response(8, "length")],
+        side_effect=[
+            mock_response(11, 3, "stop"),
+            mock_response(13, 8, "length"),
+        ],
     ) as mock_post:
         results = evaluate(
             lm=model,
@@ -146,8 +152,8 @@ def test_log_samples_keeps_chat_response_metadata_with_identical_answers(tmp_pat
         "identical answer",
     ]
     assert [sample["generation_metadata"][0][0] for sample in samples] == [
-        {"completion_tokens": 3, "finish_reason": "stop"},
-        {"completion_tokens": 8, "finish_reason": "length"},
+        {"prompt_tokens": 11, "completion_tokens": 3, "finish_reason": "stop"},
+        {"prompt_tokens": 13, "completion_tokens": 8, "finish_reason": "length"},
     ]
 
     tracker = EvaluationTracker(output_path=str(tmp_path))
@@ -166,8 +172,8 @@ def test_log_samples_keeps_chat_response_metadata_with_identical_answers(tmp_pat
         json.loads(line) for line in sample_file.read_text(encoding="utf-8").splitlines()
     ]
     assert [sample["generation_metadata"][0][0] for sample in saved_samples] == [
-        {"completion_tokens": 3, "finish_reason": "stop"},
-        {"completion_tokens": 8, "finish_reason": "length"},
+        {"prompt_tokens": 11, "completion_tokens": 3, "finish_reason": "stop"},
+        {"prompt_tokens": 13, "completion_tokens": 8, "finish_reason": "length"},
     ]
 
 
@@ -181,7 +187,9 @@ def test_parse_generations_with_metadata_allows_missing_usage_and_finish_reason(
     )
 
     assert generations == ["answer"]
-    assert metadata == [{"completion_tokens": None, "finish_reason": None}]
+    assert metadata == [
+        {"prompt_tokens": None, "completion_tokens": None, "finish_reason": None}
+    ]
 
 
 def _chat_arguments(prompt, do_sample=False):
@@ -303,7 +311,13 @@ def test_log_samples_aligns_mixed_cached_and_fresh_responses(tmp_path):
     assert sample["resps"] == [["identical answer"], ["identical answer"]]
     assert sample["generation_metadata"] == [
         [None],
-        [{"completion_tokens": 8, "finish_reason": "length"}],
+        [
+            {
+                "prompt_tokens": None,
+                "completion_tokens": 8,
+                "finish_reason": "length",
+            }
+        ],
     ]
 
     cached_task = _make_chat_task(["cached", "fresh"])
@@ -410,7 +424,15 @@ def test_log_samples_aligns_concurrent_repeats():
     assert sample["resps"] == [["identical answer", "identical answer"]]
     assert sample["generation_metadata"] == [
         [
-            {"completion_tokens": 3, "finish_reason": "stop"},
-            {"completion_tokens": 8, "finish_reason": "length"},
+            {
+                "prompt_tokens": None,
+                "completion_tokens": 3,
+                "finish_reason": "stop",
+            },
+            {
+                "prompt_tokens": None,
+                "completion_tokens": 8,
+                "finish_reason": "length",
+            },
         ]
     ]
